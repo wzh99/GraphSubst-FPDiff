@@ -47,7 +47,7 @@ if __name__ == '__main__':
     keras_model.summary()
     workload = Workload.from_keras(keras_model)
     print(workload.mod.astext())
-    workload.create_executor()
-    workload(ndarray.array(
-        np.random.randn(*batch_shape_nchw).astype(dtype), ctx=ctx)
-    )
+    # workload.create_executor()
+    # workload(ndarray.array(
+    #     np.random.randn(*batch_shape_nchw).astype(dtype), ctx=ctx)
+    # )

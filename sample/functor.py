@@ -22,6 +22,9 @@ class VarDTypeMutator(relay.ExprMutator):
         new_func = super().visit_function(fn)
         return relay.Function(new_func.params, new_func.body)
 
+    def visit_op(self, op: ir.Op):
+        return op
+
     def visit_var(self, var: relay.Var):
         new_ty = self.ty_mut.visit(var.checked_type)
         return relay.Var(name_hint=var.name_hint, type_annotation=new_ty)

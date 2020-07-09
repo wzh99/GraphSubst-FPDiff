@@ -1,21 +1,22 @@
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Union
 
+import numpy as np
 from tensorflow import keras
-from tvm import relay, ir, runtime, transform
-from util import AlterDType
+from tvm import relay, ir, runtime
 
 from common import batch_shape_nchw, dtype, target, ctx
+from util import AlterDType
 
 
 class Workload:
     executor: Optional[relay.build_module.GraphExecutor]
     func: Optional[Callable]
 
-    def __init__(self, mod: ir.IRModule, params: Dict[str, runtime.NDArray]):
-        self.mod = transform.Sequential(passes=[
-            AlterDType(dtype)
-        ])(mod)
-        self.params = dict([(key, val.asnumpy()) for key, val in params.items()])
+    def __init__(self, mod: ir.IRModule,
+                 params: Dict[str, Union[runtime.NDArray, np.ndarray]]):
+        self.mod = AlterDType(dtype)(mod)
+        self.params = dict([(key, np.array(val.asnumpy(), dtype=dtype))
+                            for key, val in params.items()])
         self.executor = None
         self.func = None
 

@@ -10,8 +10,10 @@ class AlterDType:
         self.var_mut = _VarDTypeMutator(tgt_ty)
 
     def transform_function(self, func: relay.Function, _mod: ir.IRModule,
-                           _ctx: transform.PassContext):
+                           _ctx: transform.PassContext) -> relay.Function:
         return self.var_mut.visit(func)
+
+    def __call__(self, mod: ir.IRModule) -> ir.IRModule: ...
 
 
 class _VarDTypeMutator(relay.ExprMutator):
