@@ -15,7 +15,8 @@ class Workload:
     def __init__(self, mod: ir.IRModule,
                  params: Dict[str, Union[runtime.NDArray, np.ndarray]]):
         self.mod = AlterDType(dtype)(mod)
-        self.params = dict([(key, np.array(val.asnumpy(), dtype=dtype))
+        self.params = dict([(key, np.array(val if isinstance(val, np.ndarray)
+                                           else val.asnumpy(), dtype=dtype))
                             for key, val in params.items()])
         self.executor = None
         self.func = None
@@ -36,7 +37,7 @@ class Workload:
     def __getitem__(self, item: str):
         return self.params[item]
 
-    def __call__(self, *args):
+    def __call__(self, *args) -> np.ndarray:
         if self.func is None:
             raise RuntimeError('Executor is not created.')
-        return self.func(*args, **self.params)
+        return self.func(*args, **self.params).asnumpy()

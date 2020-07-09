@@ -28,6 +28,7 @@ def get_model() -> keras.Model:
 # noinspection PyTypeChecker
 def _res_block(x: tf.Tensor, filters: int, strides: int = 1) -> tf.Tensor:
     shortcut = layers.Conv2D(filters, 1, strides=strides, use_bias=False)(x)
+    shortcut = layers.BatchNormalization(momentum=0.9, epsilon=bn_eps)(shortcut)
     x = layers.Conv2D(filters, 3, strides=strides, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization(momentum=0.9, epsilon=bn_eps)(x)
     x = layers.ReLU()(x)
