@@ -1,5 +1,7 @@
 .pkl_memoize_py3
 .vscode
 .idea
+cifar10
 download
 weights
+logs

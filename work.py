@@ -151,7 +151,7 @@ class DiffCmp:
         Report reduced statistics of all batches.
         """
         np.set_printoptions(formatter={'float': '{:.2e}'.format})
-        print('Statistics for breakpoints:')
+        print('---Statistics for breakpoints---')
         all_max = np.max(self.max, axis=0, keepdims=False)
         print('Maximum:\n', all_max)
         all_mean = np.mean(self.mean, axis=0, keepdims=False)
