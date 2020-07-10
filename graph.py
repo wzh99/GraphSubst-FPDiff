@@ -4,7 +4,7 @@ from typing import Dict, Type
 import numpy as np
 from tvm import relay, ir, transform
 
-from workload import Workload
+from work import Workload
 
 
 class GraphSubst:
@@ -109,10 +109,13 @@ def match(pat: relay.Expr, expr: relay.Expr) -> bool:
     """
     Match an expression with a pattern.
     A expression matches another iff. they are of the same type and their subexpressions
-    match pairwise. A variable in pattern matches any expression.
-    :param pat:
-    :param expr:
-    :return:
+    match pairwise. A variable in the pattern matches any expression.
+    :param pat: relay.Expr
+        Expression pattern for matching
+    :param expr: relay.Expr
+        Candidate expression to be matched
+    :return: bool
+        Whether `expr` matches `pattern`
     """
     # Check whether node type matches
     if isinstance(pat, relay.Var):

@@ -28,15 +28,15 @@ def get_pattern() -> relay.Expr:
         %bn_moving_mean: mean estimate of BN
         %bn_moving_var: variance estimate of BN
     """
-    x = relay.var('x', shape=pat_batch_shape, dtype=dtype)
+    xx = relay.var('x', shape=pat_batch_shape, dtype=dtype)
     weight = relay.var('conv_weight', shape=pat_weight_shape, dtype=dtype)
     gamma = relay.var('bn_gamma', shape=(pat_num_feat,), dtype=dtype)
     beta = relay.var('bn_beta', shape=(pat_num_feat,), dtype=dtype)
     moving_mean = relay.var('bn_moving_mean', shape=(pat_num_feat,), dtype=dtype)
     moving_var = relay.var('bn_moving_var', shape=(pat_num_feat,), dtype=dtype)
-    x = relay.nn.conv2d(x, weight, padding=(1, 1))
-    x, _, _ = relay.nn.batch_norm(x, gamma, beta, moving_mean, moving_var)
-    return x
+    xx = relay.nn.conv2d(xx, weight, padding=(1, 1))
+    xx, _, _ = relay.nn.batch_norm(xx, gamma, beta, moving_mean, moving_var)
+    return xx
 
 
 def fuse_params(conv_weight: np.ndarray, bn_gamma: np.ndarray, bn_beta: np.ndarray,
@@ -94,17 +94,27 @@ class ConvBnSubst(GraphSubst):
         return bias_add
 
 
+def _breakpoint_pattern() -> relay.Expr:
+    s = relay.var('s', shape=pat_batch_shape, dtype=dtype)
+    xx = relay.var('x', shape=pat_batch_shape, dtype=dtype)
+    xx = relay.add(xx, s)
+    xx = relay.nn.relu(xx)
+    return xx
+
+
 if __name__ == '__main__':
-    from workload import Workload
+    from work import Workload, Intermediate, DiffCmp
     from graph import WorkloadPass
     from resnet import model
     keras_model = model.get_model()
-    workload = Workload.from_keras(keras_model)
-    workload.create_executor()
-    new_workload = WorkloadPass(ConvBnSubst)(workload)
-    new_workload.create_executor()
+    wl = Workload.from_keras(keras_model)
+    subst_wl = WorkloadPass(ConvBnSubst)(wl)
+    # new_workload = workload.as_type('float32')
+    interm = Intermediate(wl, _breakpoint_pattern())
+    subst_interm = Intermediate(subst_wl, _breakpoint_pattern())
+    cmp = DiffCmp(interm, subst_interm)
     x = np.random.randn(*common.batch_shape_nchw)
-    y_orig = workload(x)
-    y_new = new_workload(x)
-    diff = np.max(np.abs(y_new - y_orig))
-    print(diff)
+    cmp(x)
+    x = np.random.randn(*common.batch_shape_nchw)
+    cmp(x)
+    cmp.report()

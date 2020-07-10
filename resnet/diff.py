@@ -17,8 +17,8 @@ def test_conv_bn_subgraph():
     weight_shape = cb.pat_weight_shape
 
     # Direct convolution then BN
-    x = cb.get_pattern()
-    f = relay.Function(relay.analysis.free_vars(x), x)
+    pat = cb.get_pattern()
+    f = relay.Function(relay.analysis.free_vars(pat), pat)
     orig_mod = ir.IRModule(functions={'main': f})
     orig_mod = relay.transform.InferType()(orig_mod)
     print(orig_mod)

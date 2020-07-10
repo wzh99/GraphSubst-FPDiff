@@ -9,6 +9,7 @@ num_stacked = 3
 
 # noinspection PyTypeChecker
 def get_model() -> keras.Model:
+    keras.initializers.he_normal()
     keras.backend.set_floatx(dtype)
     input_data = layers.Input(batch_input_shape=batch_shape_nhwc, dtype=dtype)
     x = layers.Conv2D(16, 3, padding='same', use_bias=False)(input_data)
@@ -27,8 +28,10 @@ def get_model() -> keras.Model:
 
 # noinspection PyTypeChecker
 def _res_block(x: tf.Tensor, filters: int, strides: int = 1) -> tf.Tensor:
-    shortcut = layers.Conv2D(filters, 1, strides=strides, use_bias=False)(x)
-    shortcut = layers.BatchNormalization(momentum=0.9, epsilon=bn_eps)(shortcut)
+    if strides == 1:
+        shortcut = x
+    else:
+        shortcut = layers.Conv2D(filters, 1, strides=strides, use_bias=False)(x)
     x = layers.Conv2D(filters, 3, strides=strides, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization(momentum=0.9, epsilon=bn_eps)(x)
     x = layers.ReLU()(x)
@@ -40,10 +43,8 @@ def _res_block(x: tf.Tensor, filters: int, strides: int = 1) -> tf.Tensor:
 
 
 if __name__ == '__main__':
-    from workload import Workload
-    from tvm.runtime import ndarray
-    import numpy as np
-    from common import ctx, batch_shape_nchw
+    from graph import Workload
+
     keras_model = get_model()
     keras_model.summary()
     workload = Workload.from_keras(keras_model)
