@@ -1,17 +1,19 @@
 import numpy as np
 import tvm
-from PIL import Image
-from tensorflow.keras.applications import resnet50
 from tvm import relay
+import numpy as np
+
+from resnet import model
+from common import batch_shape_nhwc
 
 # Load pretrained model
-keras_model = resnet50.ResNet50(weights=None, input_shape=(224, 224, 3))
+# keras_model = resnet50.ResNet50(weights=None, input_shape=(224, 224, 3))
+keras_model = model.get_model()
+keras_model.load_weights('../weights/resnet.h5')
 
 # Load test image
-img = Image.open('../download/cat.png').resize((224, 224))
-x = np.array(img)[np.newaxis, :].astype(np.float32)
-x_keras = resnet50.preprocess_input(x)
-x_tvm = x_keras.transpose(0, 3, 1, 2)
+x_keras = np.random.randn(*batch_shape_nhwc).astype('float32')
+x_tvm = x_keras.transpose((0, 3, 1, 2))
 
 # Compile model with Relay
 shape_dict = {'input_1': x_tvm.shape}

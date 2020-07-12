@@ -3,10 +3,11 @@ import pickle
 from typing import Tuple
 
 import numpy as np
-from tensorflow import keras
 from tensorflow.keras.preprocessing import image
 
 import common
+
+val_split = 0.1
 
 
 def load_train(path: str, channel_first: bool = True) -> Tuple[np.ndarray, np.ndarray]:
@@ -34,22 +35,41 @@ def load_test(path: str, channel_first: bool = True) -> Tuple[np.ndarray, np.nda
         return x, y
 
 
-def get_train_iterator(x: np.ndarray, y: np.ndarray) -> image.NumpyArrayIterator:
-    y = keras.utils.to_categorical(y, 10)
-    return image.ImageDataGenerator(
-        featurewise_center=True, featurewise_std_normalization=True,
+def get_train_val_iterator(x: np.ndarray, y: np.ndarray) -> \
+        Tuple[image.NumpyArrayIterator, image.NumpyArrayIterator]:
+    data_gen = image.ImageDataGenerator(
+        samplewise_center=True, samplewise_std_normalization=True,
         width_shift_range=4, height_shift_range=4, horizontal_flip=True,
-        validation_split=0.1
-    ).flow(x, y, batch_size=common.batch_size, shuffle=True)
+        validation_split=val_split
+    )
+    return (data_gen.flow(x, y, batch_size=common.batch_size, shuffle=True,
+                          subset='training'),
+            data_gen.flow(x, y, batch_size=common.batch_size, shuffle=False,
+                          subset='validation'))
 
 
 def get_test_iterator(x: np.ndarray, y: np.ndarray) -> image.NumpyArrayIterator:
-    y = keras.utils.to_categorical(y, 10)
     return image.ImageDataGenerator(
-        featurewise_center=True, featurewise_std_normalization=True
-    ).flow(x, y, batch_size=common.batch_size)
+        samplewise_center=True, samplewise_std_normalization=True
+    ).flow(x, y, batch_size=common.batch_size, shuffle=False)
+
+
+class TvmDataGen:
+    def __init__(self, x: np.ndarray, y: np.ndarray, dtype: str = common.dtype):
+        self.dtype = dtype
+        self.num_batches = len(x) // common.batch_size
+        self.iter = image.ImageDataGenerator(
+            samplewise_center=True, samplewise_std_normalization=True,
+            data_format='channels_first'
+        ).flow(x, y, batch_size=common.batch_size, shuffle=False)
+
+    def __getitem__(self, idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        x, y = self.iter[idx]
+        return x.astype(self.dtype), y
 
 
 if __name__ == '__main__':
-    x_train, y_train = load_train('cifar10', channel_first=False)
-    train_iter = get_train_iterator(x_train, y_train)
+    x_train, y_train = load_train('cifar10', channel_first=True)
+    gen = TvmDataGen(x_train, y_train)
+    x_batch, y_batch = gen[0]
+    pass

@@ -1,17 +1,12 @@
-import tensorflow as tf
-from tensorflow import keras
+from tensorflow import keras, Tensor
 from tensorflow.keras import layers
 
-from common import batch_shape_nhwc, dtype, bn_eps
-
-num_stacked = 3
+from common import batch_shape_nhwc, bn_eps
 
 
 # noinspection PyTypeChecker
-def get_model() -> keras.Model:
-    keras.initializers.he_normal()
-    keras.backend.set_floatx(dtype)
-    input_data = layers.Input(batch_input_shape=batch_shape_nhwc, dtype=dtype)
+def get_model(num_stacked: int, load_weights: bool = False) -> keras.Model:
+    input_data = layers.Input(batch_input_shape=batch_shape_nhwc)
     x = layers.Conv2D(16, 3, padding='same', use_bias=False,
                       name='input_conv')(input_data)
     for i in range(num_stacked):
@@ -24,11 +19,16 @@ def get_model() -> keras.Model:
         x = _res_block(x, 64, 'feat64_block%d' % (i + 2))
     x = layers.GlobalAvgPool2D(name='global_avg_pool')(x)
     x = layers.Dense(10, activation='softmax', name='dense')(x)
-    return keras.Model(inputs=input_data, outputs=x, name='resnet')
+    model = keras.Model(inputs=input_data, outputs=x,
+                        name='resnet%d' % (6 * num_stacked + 2))
+    if load_weights:
+        weights_path = 'weights/%s.h5' % model.name
+        model.load_weights(weights_path, by_name=True)
+    return model
 
 
 # noinspection PyTypeChecker
-def _res_block(x: tf.Tensor, filters: int, name: str, strides: int = 1) -> tf.Tensor:
+def _res_block(x: Tensor, filters: int, name: str, strides: int = 1) -> Tensor:
     if strides == 1:
         shortcut = x
     else:
@@ -50,9 +50,10 @@ def _res_block(x: tf.Tensor, filters: int, name: str, strides: int = 1) -> tf.Te
 
 if __name__ == '__main__':
     from graph import Workload
-    keras_model = get_model()
-    keras_model.summary()
-    workload = Workload.from_keras(keras_model)
+
+    resnet = get_model(3)
+    resnet.summary()
+    workload = Workload.from_keras(resnet)
     print(workload.mod.astext())
     # workload.create_executor()
     # workload(ndarray.array(

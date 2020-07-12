@@ -1,10 +1,13 @@
-from typing import Callable, Dict, Optional, Union, List, Tuple
+from typing import Callable, Dict, Optional, Union, List
 
 import numpy as np
+import tensorflow as tf
 from tensorflow import keras
+from tqdm import trange
 from tvm import relay, ir, runtime
 
 import common
+import data
 import graph
 from util import AlterDType
 
@@ -32,23 +35,31 @@ class Workload:
             Data type of network function and parameters.
         """
         self.mod = AlterDType(dtype)(mod)
-        self.params = dict([(key, np.array(val if isinstance(val, np.ndarray)
-                                           else val.asnumpy(), dtype=dtype))
+        self.params = dict([(key, self._cvt_param(val, dtype))
                             for key, val in params.items()])
         self.dtype = dtype
         self.executor = None
         self.func = None
 
     @staticmethod
-    def from_keras(model: keras.Model):
+    def _cvt_param(x: Union[runtime.NDArray, np.ndarray], dtype: str) -> np.ndarray:
+        if isinstance(x, runtime.NDArray):
+            x = x.asnumpy()
+        if x.dtype.name != dtype:
+            x = x.astype(dtype)
+        return x
+
+    @staticmethod
+    def from_keras(model: keras.Model, dtype: str = common.dtype):
         mod, params = relay.frontend.from_keras(
             model, shape={'input_1': common.batch_shape_nchw}
         )
-        return Workload(mod, params)
+        return Workload(mod, params, dtype)
 
-    def create_executor(self):
+    def build(self):
         self.executor = relay.build_module.create_executor(
-            kind='graph', mod=self.mod, ctx=common.ctx, target=common.target
+            kind='graph', mod=self.mod, ctx=runtime.context(common.target),
+            target=common.target
         )
         self.func = self.executor.evaluate()
 
@@ -60,13 +71,30 @@ class Workload:
 
     def __call__(self, *args: np.ndarray) -> np.ndarray:
         if self.func is None:
-            raise RuntimeError('Executor is not created.')
+            raise RuntimeError('Workload has not been built.')
         return self.func(*args, **self.params).asnumpy()
 
+    def test(self, data_gen: data.TvmDataGen):
+        num_batches = data_gen.num_batches
+        losses = np.ndarray((num_batches,), dtype='float32')
+        accuracies = np.ndarray((num_batches,), dtype='float32')
+        batch_range = trange(num_batches)
+        for i in batch_range:
+            x_batch, y_batch = data_gen[i]
+            y_pred = self(x_batch)
+            losses[i] = keras.losses.sparse_categorical_crossentropy(
+                y_batch, y_pred
+            ).numpy().mean()
+            accuracies[i] = keras.metrics.sparse_categorical_accuracy(
+                tf.convert_to_tensor(y_batch),
+                tf.convert_to_tensor(y_pred)
+            ).numpy().mean()
+        print('Loss:', losses.mean(), 'Accuracy:', accuracies.mean())
 
-class Intermediate:
+
+class IntermRecord:
     """
-    Intermediate results of a workload
+    Record intermediate results of a workload
     """
 
     def __init__(self, workload: Workload, pattern: relay.Expr):
@@ -77,27 +105,24 @@ class Intermediate:
         :param pattern: relay.Expr
             Expression pattern for finding breakpoints.
         """
-        # Transfer fields from workload
-        self.mod = workload.mod
-        self.params = workload.params
-        self.dtype = workload.dtype
 
         # Find breakpoints with given pattern
+        self.orig_wl = workload
         visitor = _BreakpointVisitor(pattern)
-        visitor.visit(self.mod['main'])
-        self.interm_mods = [ir.IRModule(functions={
+        visitor.visit(workload.mod['main'])
+        interm_mods = [ir.IRModule(functions={
             'main': relay.Function(relay.analysis.free_vars(expr), expr)
         }) for expr in visitor.matched]
-        self.interm_mods.append(self.mod)
+        interm_mods.append(workload.mod)
 
         # Create workloads for intermediate modules
-        self.workloads = [Workload(mod, self.params, dtype=self.dtype)
-                          for mod in self.interm_mods]
-        for wl in self.workloads:
-            wl.create_executor()
+        self.interm_wl = [Workload(mod, workload.params, dtype=workload.dtype)
+                          for mod in interm_mods]
+        for wl in self.interm_wl:
+            wl.build()
 
     def __call__(self, *args: np.ndarray) -> List[np.ndarray]:
-        return [wl(*args) for wl in self.workloads]
+        return [wl(*args) for wl in self.interm_wl]
 
 
 class _BreakpointVisitor(relay.ExprVisitor):
@@ -117,14 +142,14 @@ class _BreakpointVisitor(relay.ExprVisitor):
             self.matched.append(getitem)
 
 
-class DiffCmp:
+class IntermCmp:
     """
     Compare differences of intermediate output.
     """
 
-    def __init__(self, fst: Intermediate, snd: Intermediate):
-        assert len(fst.interm_mods) == len(snd.interm_mods)
-        self.out_len = len(fst.interm_mods)
+    def __init__(self, fst: IntermRecord, snd: IntermRecord):
+        assert len(fst.interm_wl) == len(snd.interm_wl)
+        self.out_len = len(fst.interm_wl)
         self.fst = fst
         self.snd = snd
         self.max = np.ndarray((0, self.out_len), dtype='float32')
@@ -146,6 +171,11 @@ class DiffCmp:
                      for y_fst, y_snd in zip(out_fst, out_snd)]
         self.mean = np.concatenate([self.mean, [diff_mean]], axis=0)
 
+    def test(self, data_gen: data.TvmDataGen):
+        for i in trange(data_gen.num_batches):
+            x_batch, _ = data_gen[i]
+            self(x_batch)
+
     def report(self):
         """
         Report reduced statistics of all batches.
@@ -156,3 +186,33 @@ class DiffCmp:
         print('Maximum:\n', all_max)
         all_mean = np.mean(self.mean, axis=0, keepdims=False)
         print('Mean:\n', all_mean)
+
+
+def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
+                          fst_pat: relay.Expr, snd_pat: relay.Expr,
+                          data_gen: data.TvmDataGen):
+    """
+    Compare test and intermediate results of two workloads
+    :param fst_wl: Workload
+        The first workload.
+    :param snd_wl: Workload
+        The second workload.
+    :param fst_pat: relay.Expr
+        Breakpoint pattern of first workload.
+    :param snd_pat: relay.Expr
+        Breakpoint pattern of second workload.
+    :param data_gen: TvmDataGen
+        TVM data generator for testing.
+    """
+    # Build and test two workloads
+    fst_wl.build()
+    fst_wl.test(data_gen)
+    snd_wl.build()
+    snd_wl.test(data_gen)
+
+    # Compare intermediate results
+    fst_interm = IntermRecord(fst_wl, fst_pat)
+    snd_interm = IntermRecord(snd_wl, snd_pat)
+    cmp = IntermCmp(fst_interm, snd_interm)
+    cmp.test(data_gen)
+    cmp.report()
