@@ -1,14 +1,12 @@
 import numpy as np
 import tvm
 from tvm import relay
-import numpy as np
 
-from resnet import model
 from common import batch_shape_nhwc
+from resnet import model
 
 # Load pretrained model
-# keras_model = resnet50.ResNet50(weights=None, input_shape=(224, 224, 3))
-keras_model = model.get_model()
+keras_model = model.get_model(3)
 keras_model.load_weights('../weights/resnet.h5')
 
 # Load test image
@@ -18,7 +16,7 @@ x_tvm = x_keras.transpose((0, 3, 1, 2))
 # Compile model with Relay
 shape_dict = {'input_1': x_tvm.shape}
 relay_mod, params = relay.frontend.from_keras(keras_model, shape=shape_dict)
-# print(relay_mod.astext(show_meta_data=False))
+print(relay_mod.astext())
 target = 'metal'
 ctx = tvm.context(target)
 with tvm.transform.PassContext(opt_level=3):

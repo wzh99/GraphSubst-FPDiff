@@ -63,15 +63,15 @@ class ConvBnSubst(GraphSubst):
             %bn_moving_mean: mean estimate of BN
             %bn_moving_var: variance estimate of BN
         """
-        xx = relay.var('x', shape=pat_batch_shape, dtype=dtype)
+        x = relay.var('x', shape=pat_batch_shape, dtype=dtype)
         weight = relay.var('conv_weight', shape=pat_weight_shape, dtype=dtype)
         gamma = relay.var('bn_gamma', shape=(pat_num_feat,), dtype=dtype)
         beta = relay.var('bn_beta', shape=(pat_num_feat,), dtype=dtype)
         moving_mean = relay.var('bn_moving_mean', shape=(pat_num_feat,), dtype=dtype)
         moving_var = relay.var('bn_moving_var', shape=(pat_num_feat,), dtype=dtype)
-        xx = relay.nn.conv2d(xx, weight, padding=(1, 1))
-        xx, _, _ = relay.nn.batch_norm(xx, gamma, beta, moving_mean, moving_var)
-        return xx
+        x = relay.nn.conv2d(x, weight, padding=(1, 1))
+        x, _, _ = relay.nn.batch_norm(x, gamma, beta, moving_mean, moving_var)
+        return x
 
     @staticmethod
     def fuse_params(conv_weight: np.ndarray, bn_gamma: np.ndarray,
@@ -95,10 +95,10 @@ class ConvBnSubst(GraphSubst):
 
 def _get_breakpoint_pattern() -> relay.Expr:
     s = relay.var('s', shape=pat_batch_shape, dtype=dtype)
-    xx = relay.var('x', shape=pat_batch_shape, dtype=dtype)
-    xx = relay.add(xx, s)
-    xx = relay.nn.relu(xx)
-    return xx
+    x = relay.var('x', shape=pat_batch_shape, dtype=dtype)
+    x = relay.add(x, s)
+    x = relay.nn.relu(x)
+    return x
 
 
 if __name__ == '__main__':
@@ -113,4 +113,4 @@ if __name__ == '__main__':
     wl = work.Workload.from_keras(resnet)
     subst_wl = WorkloadPass(ConvBnSubst)(wl)
     pat = _get_breakpoint_pattern()
-    work.compare_two_workloads(wl, subst_wl, pat, pat, test_gen)
+    work.compare_two_workloads(wl, subst_wl, [pat], [pat], test_gen)

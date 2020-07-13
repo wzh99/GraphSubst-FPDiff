@@ -55,7 +55,3 @@ if __name__ == '__main__':
     resnet.summary()
     workload = Workload.from_keras(resnet)
     print(workload.mod.astext())
-    # workload.create_executor()
-    # workload(ndarray.array(
-    #     np.random.randn(*batch_shape_nchw).astype(dtype), ctx=ctx)
-    # )

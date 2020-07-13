@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from tqdm import trange
-from tvm import relay, ir, runtime
+from tvm import relay, ir, runtime, transform
 
 import common
 import data
@@ -57,10 +57,11 @@ class Workload:
         return Workload(mod, params, dtype)
 
     def build(self):
-        self.executor = relay.build_module.create_executor(
-            kind='graph', mod=self.mod, ctx=runtime.context(common.target),
-            target=common.target
-        )
+        with transform.PassContext(opt_level=0):
+            self.executor = relay.build_module.create_executor(
+                kind='graph', mod=self.mod, ctx=runtime.context(common.target),
+                target=common.target
+            )
         self.func = self.executor.evaluate()
 
     def as_type(self, dtype: str):
@@ -97,18 +98,18 @@ class IntermRecord:
     Record intermediate results of a workload
     """
 
-    def __init__(self, workload: Workload, pattern: relay.Expr):
+    def __init__(self, workload: Workload, patterns: List[relay.Expr]):
         """
         Constructor.
         :param workload: Workload
             The workload object whose intermediate results should be retrieved.
-        :param pattern: relay.Expr
+        :param patterns: relay.Expr
             Expression pattern for finding breakpoints.
         """
 
         # Find breakpoints with given pattern
         self.orig_wl = workload
-        visitor = _BreakpointVisitor(pattern)
+        visitor = _BreakpointVisitor(patterns)
         visitor.visit(workload.mod['main'])
         interm_mods = [ir.IRModule(functions={
             'main': relay.Function(relay.analysis.free_vars(expr), expr)
@@ -126,19 +127,19 @@ class IntermRecord:
 
 
 class _BreakpointVisitor(relay.ExprVisitor):
-    def __init__(self, pattern: relay.Expr):
+    def __init__(self, patterns: List[relay.Expr]):
         super().__init__()
         self.matched: List[relay.Expr] = []
-        self.pattern = pattern
+        self.patterns = patterns
 
     def visit_call(self, call: relay.Call):
         super().visit_call(call)
-        if graph.match(self.pattern, call):
+        if graph.match_any(self.patterns, call):
             self.matched.append(call)
 
     def visit_tuple_getitem(self, getitem: relay.TupleGetItem):
         super().visit_tuple_getitem(getitem)
-        if graph.match(self.pattern, getitem):
+        if graph.match_any(self.patterns, getitem):
             self.matched.append(getitem)
 
 
@@ -189,7 +190,7 @@ class IntermCmp:
 
 
 def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
-                          fst_pat: relay.Expr, snd_pat: relay.Expr,
+                          fst_pat: List[relay.Expr], snd_pat: List[relay.Expr],
                           data_gen: data.TvmDataGen):
     """
     Compare test and intermediate results of two workloads

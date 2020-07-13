@@ -1,5 +1,3 @@
-import os
-
 from tensorflow import keras
 
 import common
@@ -13,8 +11,6 @@ def train(model: keras.Model):
     model.compile(optimizer=SGD(learning_rate=0.1, momentum=0.9, nesterov=True),
                   loss='sparse_categorical_crossentropy', metrics=['accuracy'])
     weight_path = 'weights/%s.h5' % model.name
-    if os.path.exists(weight_path):
-        model.load_weights(weight_path, by_name=True)
     x_train, y_train = data.load_train('cifar10', channel_first=False)
     train_iter, val_iter = data.get_train_val_iterator(x_train, y_train)
     callbacks = [
@@ -30,8 +26,6 @@ def train(model: keras.Model):
 
 def test(model: keras.Model):
     model.compile(loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    weight_path = 'weights/%s.h5' % model.name
-    model.load_weights(weight_path, by_name=True)
     x_test, y_test = data.load_test('cifar10', channel_first=False)
     test_iter = data.get_test_iterator(x_test, y_test)
     model.evaluate(test_iter, batch_size=common.batch_size,
@@ -40,6 +34,8 @@ def test(model: keras.Model):
 
 if __name__ == '__main__':
     from resnet.model import get_model
-    resnet = get_model(num_stacked=3, load_weights=True)
-    # train(resnet)
-    test(resnet)
+
+    keras_model = get_model(num_stacked=3, load_weights=True)
+    # train(keras_model)
+    test(keras_model)
+    keras.applications.NASNetMobile()
