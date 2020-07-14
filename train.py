@@ -38,4 +38,3 @@ if __name__ == '__main__':
     keras_model = get_model(num_stacked=3, load_weights=True)
     # train(keras_model)
     test(keras_model)
-    keras.applications.NASNetMobile()
