@@ -50,11 +50,20 @@ class Workload:
         return x
 
     @staticmethod
-    def from_keras(model: keras.Model, dtype: str = common.dtype):
+    def from_keras(model: keras.Model, dtype: str = 'float32'):
+        """
+        Build workload from a Keras model.
+        :param model: keras.Model
+             A Keras model to be converted.
+        :param dtype: str
+            Data type of target workload.
+        :return: Workload
+            The built workload object.
+        """
         mod, params = relay.frontend.from_keras(
             model, shape={'input_1': common.batch_shape_nchw}
         )
-        return Workload(mod, params, dtype)
+        return Workload(mod, params, dtype=dtype)
 
     def build(self):
         with transform.PassContext(opt_level=0):
@@ -67,15 +76,12 @@ class Workload:
     def as_type(self, dtype: str):
         return Workload(self.mod, self.params, dtype=dtype)
 
-    def __getitem__(self, item: str):
-        return self.params[item]
-
     def __call__(self, *args: np.ndarray) -> np.ndarray:
         if self.func is None:
             raise RuntimeError('Workload has not been built.')
         return self.func(*args, **self.params).asnumpy()
 
-    def test(self, data_gen: data.TvmDataGen):
+    def evaluate(self, data_gen: data.TvmDataGen):
         num_batches = data_gen.num_batches
         losses = np.ndarray((num_batches,), dtype='float32')
         accuracies = np.ndarray((num_batches,), dtype='float32')
@@ -172,8 +178,8 @@ class IntermCmp:
                      for y_fst, y_snd in zip(out_fst, out_snd)]
         self.mean = np.concatenate([self.mean, [diff_mean]], axis=0)
 
-    def test(self, data_gen: data.TvmDataGen):
-        for i in trange(data_gen.num_batches):
+    def test(self, data_gen: data.TvmDataGen, ratio: float = 1):
+        for i in trange(int(data_gen.num_batches * ratio)):
             x_batch, _ = data_gen[i]
             self(x_batch)
 
@@ -182,7 +188,7 @@ class IntermCmp:
         Report reduced statistics of all batches.
         """
         np.set_printoptions(formatter={'float': '{:.2e}'.format})
-        print('---Statistics for breakpoints---')
+        print('---Differences of breakpoints---')
         all_max = np.max(self.max, axis=0, keepdims=False)
         print('Maximum:\n', all_max)
         all_mean = np.mean(self.mean, axis=0, keepdims=False)
@@ -191,9 +197,9 @@ class IntermCmp:
 
 def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
                           fst_pat: List[relay.Expr], snd_pat: List[relay.Expr],
-                          data_gen: data.TvmDataGen):
+                          data_gen: data.TvmDataGen, cmp_ratio: float = 1):
     """
-    Compare test and intermediate results of two workloads
+    Compare evaluation and intermediate results of two workloads
     :param fst_wl: Workload
         The first workload.
     :param snd_wl: Workload
@@ -204,16 +210,21 @@ def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
         Breakpoint pattern of second workload.
     :param data_gen: TvmDataGen
         TVM data generator for testing.
+    :param cmp_ratio: float
+        Ratio of input data for comparing intermediate results.
     """
-    # Build and test two workloads
+    # Build and evaluate two workloads
     fst_wl.build()
-    fst_wl.test(data_gen)
+    print('Evaluating first workload...')
+    fst_wl.evaluate(data_gen)
     snd_wl.build()
-    snd_wl.test(data_gen)
+    print('Evaluating second workload...')
+    snd_wl.evaluate(data_gen)
 
     # Compare intermediate results
+    print('Comparing intermediate results...')
     fst_interm = IntermRecord(fst_wl, fst_pat)
     snd_interm = IntermRecord(snd_wl, snd_pat)
     cmp = IntermCmp(fst_interm, snd_interm)
-    cmp.test(data_gen)
+    cmp.test(data_gen, cmp_ratio)
     cmp.report()

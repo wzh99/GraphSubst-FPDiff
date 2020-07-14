@@ -41,12 +41,12 @@ def _res_block(x: Tensor, filters: int, name: str, strides: int = 1) -> Tensor:
     x = layers.Conv2D(filters, 3, strides=strides, padding='same', use_bias=False,
                       kernel_regularizer=l2_reg, name=name + '_conv1')(x)
     x = layers.BatchNormalization(epsilon=bn_eps, gamma_regularizer=l2_reg,
-                                  beta_regularizer=l2_reg, name=name + '_bn1')(x)
+                                  name=name + '_bn1')(x)
     x = layers.ReLU(name=name + '_relu1')(x)
     x = layers.Conv2D(filters, 3, padding='same', use_bias=False,
                       kernel_regularizer=l2_reg, name=name + '_conv2')(x)
     x = layers.BatchNormalization(epsilon=bn_eps, gamma_regularizer=l2_reg,
-                                  beta_regularizer=l2_reg, name=name + '_bn2')(x)
+                                  name=name + '_bn2')(x)
     x = layers.Add(name=name + '_add')([x, shortcut])
     x = layers.ReLU(name=name + '_relu2')(x)
     return x
