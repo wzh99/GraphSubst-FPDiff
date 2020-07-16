@@ -5,6 +5,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tqdm import trange
 from tvm import relay, ir, runtime, transform
+from tvm.contrib import graph_runtime
 
 import common
 import data
@@ -16,7 +17,7 @@ class Workload:
     A workload is an object containing computation graph of a network and its
     parameters.
     """
-    executor: Optional[relay.build_module.GraphExecutor]
+    executor: Optional[graph_runtime.GraphModule]
     func: Optional[Callable]
 
     def __init__(self, mod: ir.IRModule,
@@ -65,20 +66,23 @@ class Workload:
         return Workload(mod, params, dtype=dtype)
 
     def build(self):
-        with transform.PassContext(opt_level=0):
-            self.executor = relay.build_module.create_executor(
-                kind='graph', mod=self.mod, ctx=runtime.context(common.target),
-                target=common.target
-            )
-        self.func = self.executor.evaluate()
+        with transform.PassContext(opt_level=0,
+                                   config={'tir.disable_vectorize': True}):
+            graph, lib, params = relay.build(self.mod, target=common.target,
+                                             params=self.params)
+        self.executor = graph_runtime.create(
+            graph, lib, ctx=runtime.context(common.target)
+        )
+        self.executor.set_input(**params)
 
     def as_type(self, dtype: str):
         return Workload(self.mod, self.params, dtype=dtype)
 
-    def __call__(self, *args: np.ndarray) -> np.ndarray:
-        if self.func is None:
-            raise RuntimeError('Workload has not been built.')
-        return self.func(*args, **self.params).asnumpy()
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        if self.executor is None:
+            self.build()
+        self.executor.run(input_1=x)
+        return self.executor.get_output(0).asnumpy()
 
     def evaluate(self, data_gen: data.TvmDataGen):
         num_batches = data_gen.num_batches
@@ -127,8 +131,8 @@ class IntermRecord:
         for wl in self.interm_wl:
             wl.build()
 
-    def __call__(self, *args: np.ndarray) -> List[np.ndarray]:
-        return [wl(*args) for wl in self.interm_wl]
+    def __call__(self, x: np.ndarray) -> List[np.ndarray]:
+        return [wl(x) for wl in self.interm_wl]
 
 
 class _BreakpointVisitor(relay.ExprVisitor):
@@ -215,10 +219,8 @@ def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
         Ratio of input data for comparing intermediate results.
     """
     # Build and evaluate two workloads
-    fst_wl.build()
     print('Evaluating first workload...')
     fst_wl.evaluate(data_gen)
-    snd_wl.build()
     print('Evaluating second workload...')
     snd_wl.evaluate(data_gen)
 

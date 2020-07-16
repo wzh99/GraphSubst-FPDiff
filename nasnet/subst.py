@@ -10,7 +10,5 @@ if __name__ == '__main__':
     nasnet = get_model(load_weights=True)
     wl = Workload.from_keras(nasnet, dtype='float16')
     subst_wl = WorkloadPass(ConvBnSubst)(wl)
-    wl.build()
     wl.evaluate(test_gen)
-    # subst_wl.build()
-    # subst_wl.evaluate(test_gen)
+    subst_wl.evaluate(test_gen)

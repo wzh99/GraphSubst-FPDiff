@@ -107,7 +107,7 @@ if __name__ == '__main__':
     from resnet import get_model
     import data
 
-    resnet = get_model(3, load_weights=True)
+    resnet = get_model(18, load_weights=True)
     x_test, y_test = data.load_test('cifar10', channel_first=True)
     test_gen = data.TvmDataGen(x_test, y_test)
     wl = work.Workload.from_keras(resnet, dtype='float16')
