@@ -8,7 +8,6 @@ from tvm import relay, ir, runtime, transform
 
 import common
 import data
-import graph
 from util import AlterDType
 
 
@@ -140,12 +139,14 @@ class _BreakpointVisitor(relay.ExprVisitor):
 
     def visit_call(self, call: relay.Call):
         super().visit_call(call)
-        if graph.match_any(self.patterns, call):
+        from graph import match_any
+        if match_any(self.patterns, call):
             self.matched.append(call)
 
     def visit_tuple_getitem(self, getitem: relay.TupleGetItem):
         super().visit_tuple_getitem(getitem)
-        if graph.match_any(self.patterns, getitem):
+        from graph import match_any
+        if match_any(self.patterns, getitem):
             self.matched.append(getitem)
 
 

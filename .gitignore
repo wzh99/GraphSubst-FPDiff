@@ -5,3 +5,4 @@ cifar10
 download
 weights
 logs
+*.png

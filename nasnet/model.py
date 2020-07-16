@@ -27,18 +27,18 @@ def get_model(load_weights: bool = False) -> keras.Model:
         # Reduction cell
         if red_idx > 0:
             cur_filters *= 2
-            nxt = _reduction(prev, cur, cur_filters, 'red_%d' % (red_idx + 1))
+            nxt = _reduction(prev, cur, cur_filters, 'red_%d' % red_idx)
             prev, cur = cur, nxt
 
         # Normal cell
         for normal_idx in range(num_stacked):
             nxt = _normal(prev, cur, cur_filters,
-                          'norm_%d_%d' % (red_idx + 1, normal_idx + 1))
+                          'norm_%d_%d' % (red_idx, normal_idx + 1))
             prev, cur = cur, nxt
 
     # Final output
     x = layers.ReLU(name='final_relu')(cur)
-    x = layers.GlobalAvgPool2D()(x)
+    x = layers.GlobalAvgPool2D(name='global_avg')(x)
     x = layers.Dense(
         10, activation='softmax', kernel_regularizer=l2_reg, name='dense'
     )(x)
@@ -98,7 +98,7 @@ def _reduction(prev: Optional[Tensor], cur: Tensor, num_filters: int, name: str)
         )(blk_1),
         blk_2
     ], name=name + '_add5')
-    x = layers.concatenate([blk_2, blk_3, blk_4, blk_5])
+    x = layers.concatenate([blk_2, blk_3, blk_4, blk_5], name=name + '_concat')
     return x
 
 
@@ -133,7 +133,8 @@ def _normal(prev: Optional[Tensor], cur: Tensor, num_filters: int, name: str) \
         _sep(prev, num_filters, 5, name=name + '_blk5_sep1'),
         _sep(prev, num_filters, 3, name=name + '_blk5_sep2')
     ], name=name + '_add5')
-    x = layers.concatenate([prev, blk_1, blk_2, blk_3, blk_4, blk_5])
+    x = layers.concatenate([prev, blk_1, blk_2, blk_3, blk_4, blk_5],
+                           name=name + "_concat")
     return x
 
 
@@ -183,7 +184,7 @@ def _fit(src: Optional[Tensor], tgt: Tensor, num_filters: int, name: str) -> Ten
         num_filters // 2, 1, use_bias=False, kernel_initializer='he_normal',
         kernel_regularizer=l2_reg, name=name + '_conv2'
     )(p2)
-    x = layers.concatenate([p1, p2])
+    x = layers.concatenate([p1, p2], name=name + '_concat')
     x = layers.BatchNormalization(
         epsilon=bn_eps, gamma_regularizer=l2_reg, name=name + '_bn'
     )(x)
@@ -204,5 +205,7 @@ def _squeeze(x: Tensor, num_filters: int, name: str) -> Tensor:
 
 
 if __name__ == '__main__':
+    from work import Workload
     nasnet = get_model()
     nasnet.summary()
+    print(Workload.from_keras(nasnet).mod)

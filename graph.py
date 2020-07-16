@@ -64,7 +64,7 @@ class WorkloadPass:
     def __call__(self, workload: Workload) -> Workload:
         subst = self.ctor(copy.deepcopy(workload.params))
         new_mod = _SubstPass(subst)(workload.mod)
-        return Workload(new_mod, subst.params)
+        return Workload(new_mod, subst.params, dtype=workload.dtype)
 
 
 @relay.transform.function_pass(opt_level=0)
@@ -104,9 +104,16 @@ class _SubstMutator(relay.ExprMutator):
             return new_getitem
         return self.subst(new_getitem)
 
+    def visit_tuple(self, tup: relay.Tuple) -> relay.Expr:
+        new_fields = [self.visit(field) for field in tup.fields]
+        new_tuple = relay.Tuple(new_fields)
+        if not match_one(self.pattern, new_tuple):
+            return new_tuple
+        return self.subst(new_tuple)
 
-def match_any(patterns: List[relay.Expr], expr: relay.Expr) -> bool:
-    for pat in patterns:
+
+def match_any(pat_list: List[relay.Expr], expr: relay.Expr) -> bool:
+    for pat in pat_list:
         if match_one(pat, expr):
             return True
     return False
@@ -128,7 +135,7 @@ def match_one(pat: relay.Expr, expr: relay.Expr) -> bool:
     """
     # Check whether node type matches
     if isinstance(pat, relay.Var):
-        return True
+        return True  # a variable matches any expression
     if pat.__class__ != expr.__class__:
         return False
 
@@ -151,16 +158,20 @@ def _match_call(pat: relay.Call, expr: relay.Call) -> bool:
         return False
 
     # Match arguments
-    for pat_arg, expr_arg in zip(pat.args, expr.args):
-        # Don't check further if a variable is encountered
-        if isinstance(pat_arg, relay.Var):
-            continue
-        if not match_one(pat_arg, expr_arg):
-            return False
-
-    return True
+    return all([match_one(pat_arg, expr_arg)
+                for pat_arg, expr_arg in zip(pat.args, expr.args)])
 
 
 def _match_tuple_getitem(pat: relay.TupleGetItem, expr: relay.TupleGetItem) -> bool:
     return pat.index == expr.index and \
            match_one(pat.tuple_value, expr.tuple_value)
+
+
+def _match_tuple(pat: relay.Tuple, expr: relay.Tuple) -> bool:
+    # Match field numbers
+    if len(pat.fields) != len(expr.fields):
+        return False
+
+    # Match fields pairwise
+    return all([match_one(pat_field, expr_field)]
+               for pat_field, expr_field in zip(pat.fields, expr.fields))
