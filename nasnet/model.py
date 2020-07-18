@@ -139,8 +139,8 @@ def _normal(prev: Optional[Tensor], cur: Tensor, num_filters: int, name: str) \
 
 
 # noinspection PyTypeChecker
-def _sep(x: Tensor, num_filters: int, kernel_size: int, name: str, strides: int = 1) \
-        -> Tensor:
+def _sep(x: Tensor, num_filters: int, kernel_size: int, name: str,
+         strides: int = 1) -> Tensor:
     x = layers.ReLU(name=name + '_relu1')(x)
     x = layers.SeparableConv2D(
         num_filters, kernel_size, strides=strides, padding='same', use_bias=False,

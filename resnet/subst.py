@@ -17,40 +17,6 @@ eps = common.bn_eps
 
 
 class ConvBnSubst(GraphSubst):
-    def __call__(self, expr: relay.TupleGetItem) -> relay.Expr:
-        # Extract related expressions and variables
-        bn_call = expr.tuple_value
-        conv_call, bn_gamma_var, bn_beta_var, bn_moving_mean_var, bn_moving_var_var \
-            = bn_call.args
-        input_expr, conv_weight_var = conv_call.args
-
-        # Get parameters for variables involved
-        conv_weight_param = self[conv_weight_var]
-        bn_gamma_param = self[bn_gamma_var]
-        bn_beta_param = self[bn_beta_var]
-        bn_moving_mean_param = self[bn_moving_mean_var]
-        bn_moving_var_param = self[bn_moving_var_var]
-        for var in [conv_weight_var, bn_gamma_var, bn_beta_var, bn_moving_mean_var,
-                    bn_moving_var_var]:
-            del self[var]
-
-        # Fuse parameters
-        fused_weight_param, fused_bias_param = self.fuse_params(
-            conv_weight_param, bn_gamma_param, bn_beta_param, bn_moving_mean_param,
-            bn_moving_var_param
-        )
-        fused_weight_var = relay.var(self.next_param_name())
-        self[fused_weight_var] = fused_weight_param
-        fused_bias_var = relay.var(self.next_param_name())
-        self[fused_bias_var] = fused_bias_param
-
-        # Reconstruct subgraph
-        new_conv_call = relay.Call(conv_call.op, [input_expr, fused_weight_var],
-                                   attrs=conv_call.attrs)
-        bias_add = relay.nn.bias_add(new_conv_call, fused_bias_var)
-
-        return bias_add
-
     def get_pattern(self) -> relay.Expr:
         """
         Get pattern of a source convolution-BN subgraph to be substituted for.
@@ -72,6 +38,35 @@ class ConvBnSubst(GraphSubst):
         x = relay.nn.conv2d(x, weight, padding=(1, 1))
         x, _, _ = relay.nn.batch_norm(x, gamma, beta, moving_mean, moving_var)
         return x
+
+    def __call__(self, expr: relay.TupleGetItem) -> relay.Expr:
+        # Extract related expressions and variables
+        bn_call = expr.tuple_value
+        conv_call, bn_gamma_var, bn_beta_var, bn_moving_mean_var, bn_moving_var_var \
+            = bn_call.args
+        input_expr, conv_weight_var = conv_call.args
+
+        # Get parameters for variables involved
+        conv_weight_param = self[conv_weight_var]
+        bn_gamma_param = self[bn_gamma_var]
+        bn_beta_param = self[bn_beta_var]
+        bn_moving_mean_param = self[bn_moving_mean_var]
+        bn_moving_var_param = self[bn_moving_var_var]
+
+        # Fuse parameters
+        fused_weight_param, fused_bias_param = self.fuse_params(
+            conv_weight_param, bn_gamma_param, bn_beta_param, bn_moving_mean_param,
+            bn_moving_var_param
+        )
+        fused_weight_var = self.add_var_with_param(fused_weight_param)
+        fused_bias_var = self.add_var_with_param(fused_bias_param)
+
+        # Reconstruct subgraph
+        new_conv_call = relay.Call(conv_call.op, [input_expr, fused_weight_var],
+                                   attrs=conv_call.attrs)
+        bias_add = relay.nn.bias_add(new_conv_call, fused_bias_var)
+
+        return bias_add
 
     @staticmethod
     def fuse_params(conv_weight: np.ndarray, bn_gamma: np.ndarray,
@@ -103,7 +98,7 @@ def _get_breakpoint_pattern() -> relay.Expr:
 
 if __name__ == '__main__':
     import work
-    from graph import WorkloadPass
+    from graph import SubstPass
     from resnet import get_model
     import data
 
@@ -111,7 +106,7 @@ if __name__ == '__main__':
     x_test, y_test = data.load_test('cifar10', channel_first=True)
     test_gen = data.TvmDataGen(x_test, y_test)
     wl = work.Workload.from_keras(resnet, dtype='float16')
-    subst_wl = WorkloadPass(ConvBnSubst)(wl)
+    subst_wl = SubstPass(ConvBnSubst)(wl)
     # wl = wl.as_type(common.dtype)
     # subst_wl = subst_wl.as_type(common.dtype)
     pat = _get_breakpoint_pattern()

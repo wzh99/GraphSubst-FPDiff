@@ -11,7 +11,6 @@ class GraphSubst:
     def __init__(self, params: Dict[str, np.ndarray]):
         self.params = params
         self.next_idx = 1
-        self._update_next_idx()  # skip all preexisting names
 
     def get_pattern(self) -> relay.Expr:
         """
@@ -30,6 +29,12 @@ class GraphSubst:
         :return: relay.Expr
         """
         pass
+
+    def add_var_with_param(self, param: np.ndarray) -> relay.Var:
+        var = relay.var(self.next_param_name(), shape=param.shape,
+                        dtype=param.dtype.name)
+        self[var] = param
+        return var
 
     def next_param_name(self) -> str:
         self._update_next_idx()
@@ -53,7 +58,7 @@ class GraphSubst:
         del self.params[key.name_hint]
 
 
-class WorkloadPass:
+class SubstPass:
     """
     A pass on workload (IR module and parameters).
     """
@@ -63,12 +68,17 @@ class WorkloadPass:
 
     def __call__(self, workload: Workload) -> Workload:
         subst = self.ctor(copy.deepcopy(workload.params))
-        new_mod = _SubstPass(subst)(workload.mod)
-        return Workload(new_mod, subst.params, dtype=workload.dtype)
+        new_mod = _SubstFuncPass(subst)(workload.mod)
+        param_names = [param.name_hint for param in new_mod['main'].params]
+        used_params = {}
+        for key, val in subst.params.items():
+            if param_names.__contains__(key):
+                used_params[key] = val
+        return Workload(new_mod, used_params, dtype=workload.dtype)
 
 
 @relay.transform.function_pass(opt_level=0)
-class _SubstPass:
+class _SubstFuncPass:
     def __init__(self, subst: GraphSubst):
         self.subst = subst
 
@@ -173,5 +183,5 @@ def _match_tuple(pat: relay.Tuple, expr: relay.Tuple) -> bool:
         return False
 
     # Match fields pairwise
-    return all([match_one(pat_field, expr_field)]
-               for pat_field, expr_field in zip(pat.fields, expr.fields))
+    return all([match_one(pat_field, expr_field)
+                for pat_field, expr_field in zip(pat.fields, expr.fields)])
