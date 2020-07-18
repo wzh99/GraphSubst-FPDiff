@@ -84,42 +84,27 @@ class _SubstFuncPass:
 
     def transform_function(self, func: relay.Function, _mod: ir.IRModule,
                            _ctx: transform.PassContext) -> relay.Function:
-        return _SubstMutator(self.subst).visit(func)
+        return _SubstMutator(self.subst).visit_function(func)
 
     def __call__(self, mod: ir.IRModule) -> ir.IRModule: ...
 
 
 class _SubstMutator(relay.ExprMutator):
     def __init__(self, subst: GraphSubst):
-        super().__init__()
+        super(_SubstMutator, self).__init__()
         self.subst = subst
         self.pattern = subst.get_pattern()
+
+    def visit(self, expr: relay.Expr) -> relay.Expr:
+        new_expr = super(_SubstMutator, self).visit(expr)
+        if not match_one(self.pattern, new_expr):
+            return new_expr
+        return self.subst(new_expr)
 
     def visit_function(self, fn: relay.Function) -> relay.Function:
         new_body = self.visit(fn.body)
         return relay.Function(relay.analysis.free_vars(new_body), new_body,
                               ret_type=fn.ret_type)
-
-    def visit_call(self, call: relay.Call) -> relay.Expr:
-        new_args = [self.visit(arg) for arg in call.args]
-        new_call = relay.Call(call.op, new_args, attrs=call.attrs)
-        if not match_one(self.pattern, call):
-            return new_call
-        return self.subst(new_call)
-
-    def visit_tuple_getitem(self, getitem: relay.TupleGetItem) -> relay.Expr:
-        new_tuple = self.visit(getitem.tuple_value)
-        new_getitem = relay.TupleGetItem(new_tuple, getitem.index)
-        if not match_one(self.pattern, new_getitem):
-            return new_getitem
-        return self.subst(new_getitem)
-
-    def visit_tuple(self, tup: relay.Tuple) -> relay.Expr:
-        new_fields = [self.visit(field) for field in tup.fields]
-        new_tuple = relay.Tuple(new_fields)
-        if not match_one(self.pattern, new_tuple):
-            return new_tuple
-        return self.subst(new_tuple)
 
 
 def match_any(pat_list: List[relay.Expr], expr: relay.Expr) -> bool:
@@ -163,10 +148,6 @@ def match_one(pat: relay.Expr, expr: relay.Expr) -> bool:
 def _match_call(pat: relay.Call, expr: relay.Call) -> bool:
     # Match operator
     if pat.op.name != expr.op.name:
-        return False
-
-    # Match arity
-    if len(pat.args) != len(expr.args):
         return False
 
     # Match arguments

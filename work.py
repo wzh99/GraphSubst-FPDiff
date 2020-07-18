@@ -135,26 +135,16 @@ class BreakpointRecord:
 
 
 class _BreakpointVisitor(relay.ExprVisitor):
-    def __init__(self, patterns: List[relay.Expr]):
+    def __init__(self, pat_list: List[relay.Expr]):
         super().__init__()
         self.matched: List[relay.Expr] = []
-        self.patterns = patterns
+        self.pat_list = pat_list
 
-    def visit_call(self, call: relay.Call):
-        super().visit_call(call)
-        self.try_match(call)
-
-    def visit_tuple_getitem(self, getitem: relay.TupleGetItem):
-        super().visit_tuple_getitem(getitem)
-        self.try_match(getitem)
-
-    def visit_tuple(self, tup: relay.Tuple):
-        super().visit_tuple(tup)
-        self.try_match(tup)
-
-    def try_match(self, expr: relay.Expr):
+    def visit(self, expr: relay.Expr):
+        super(_BreakpointVisitor, self).visit(expr)
         from graph import match_any
-        if match_any(self.patterns, expr):
+        if match_any(self.pat_list, expr) and \
+                not any([expr.same_as(prev) for prev in self.matched]):
             self.matched.append(expr)
 
 
@@ -223,6 +213,8 @@ def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
         Ratio of input data for comparing intermediate results.
     """
     # Build and evaluate two workloads
+    fst_wl.build()
+    snd_wl.build()
     print('Evaluating first workload...')
     fst_wl.evaluate(data_gen)
     print('Evaluating second workload...')
