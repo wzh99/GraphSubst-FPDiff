@@ -8,14 +8,13 @@ from common import batch_shape_nhwc, bn_eps
 l2_reg = regularizers.l2(1e-4)
 
 # NASNet-A 6 @ 768
-num_stacked = 6
 num_penult_filters = 768
 num_stem_filters = 96
 num_reduction = 2
 
 
 # noinspection PyTypeChecker
-def get_model(load_weights: bool = False) -> keras.Model:
+def get_model(num_stacked: int, load_weights: bool = False) -> keras.Model:
     # Stem from input
     input_tensor = layers.Input(batch_input_shape=batch_shape_nhwc)
     cur_filters = num_penult_filters // ((2 ** num_reduction) * 6)
@@ -44,7 +43,8 @@ def get_model(load_weights: bool = False) -> keras.Model:
     )(x)
 
     # Build model
-    model = keras.Model(inputs=input_tensor, outputs=x, name='nasnet')
+    model = keras.Model(inputs=input_tensor, outputs=x,
+                        name='nasnet-a_%d_%d' % (num_stacked, num_penult_filters))
     if load_weights:
         weights_path = 'weights/%s.h5' % model.name
         model.load_weights(weights_path, by_name=True)
@@ -206,6 +206,6 @@ def _squeeze(x: Tensor, num_filters: int, name: str) -> Tensor:
 
 if __name__ == '__main__':
     from work import Workload
-    nasnet = get_model()
+    nasnet = get_model(1)
     nasnet.summary()
     print(Workload.from_keras(nasnet).mod)

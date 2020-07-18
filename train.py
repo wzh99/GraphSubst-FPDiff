@@ -33,8 +33,8 @@ def test(model: keras.Model):
 
 
 if __name__ == '__main__':
-    from resnet.model import get_model
+    from nasnet import get_model
 
-    keras_model = get_model(num_stacked=3, load_weights=True)
+    keras_model = get_model(num_stacked=6, load_weights=True)
     # train(keras_model)
     test(keras_model)

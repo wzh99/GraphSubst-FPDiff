@@ -102,23 +102,23 @@ class Workload:
         print('Loss:', losses.mean(), 'Accuracy:', accuracies.mean())
 
 
-class IntermRecord:
+class BreakpointRecord:
     """
     Record intermediate results of a workload
     """
 
-    def __init__(self, workload: Workload, patterns: List[relay.Expr]):
+    def __init__(self, workload: Workload, pat_list: List[relay.Expr]):
         """
         Constructor.
         :param workload: Workload
             The workload object whose intermediate results should be retrieved.
-        :param patterns: relay.Expr
-            Expression pattern for finding breakpoints.
+        :param pat_list: relay.Expr
+            List of patterns for finding breakpoints.
         """
 
         # Find breakpoints with given pattern
         self.orig_wl = workload
-        visitor = _BreakpointVisitor(patterns)
+        visitor = _BreakpointVisitor(pat_list)
         visitor.visit(workload.mod['main'])
         interm_mods = [ir.IRModule(functions={
             'main': relay.Function(relay.analysis.free_vars(expr), expr)
@@ -143,23 +143,28 @@ class _BreakpointVisitor(relay.ExprVisitor):
 
     def visit_call(self, call: relay.Call):
         super().visit_call(call)
-        from graph import match_any
-        if match_any(self.patterns, call):
-            self.matched.append(call)
+        self.try_match(call)
 
     def visit_tuple_getitem(self, getitem: relay.TupleGetItem):
         super().visit_tuple_getitem(getitem)
+        self.try_match(getitem)
+
+    def visit_tuple(self, tup: relay.Tuple):
+        super().visit_tuple(tup)
+        self.try_match(tup)
+
+    def try_match(self, expr: relay.Expr):
         from graph import match_any
-        if match_any(self.patterns, getitem):
-            self.matched.append(getitem)
+        if match_any(self.patterns, expr):
+            self.matched.append(expr)
 
 
-class IntermCmp:
+class RecordCompare:
     """
-    Compare differences of intermediate output.
+    Compare differences of breakpoint output records.
     """
 
-    def __init__(self, fst: IntermRecord, snd: IntermRecord):
+    def __init__(self, fst: BreakpointRecord, snd: BreakpointRecord):
         assert len(fst.interm_wl) == len(snd.interm_wl)
         self.out_len = len(fst.interm_wl)
         self.fst = fst
@@ -167,15 +172,15 @@ class IntermCmp:
         self.max = np.ndarray((0, self.out_len), dtype='float32')
         self.mean = np.ndarray((0, self.out_len), dtype='float32')
 
-    def __call__(self, *args: np.ndarray):
+    def __call__(self, x: np.ndarray):
         """
         Run one batch on two intermediate objects and add one row to both maximum
         and mean statistical matrices.
-        :param args: Tuple[np.ndarray, ...]
+        :param x: np.ndarray
             Input tensors.
         """
-        out_fst = self.fst(*args)
-        out_snd = self.snd(*args)
+        out_fst = self.fst(x)
+        out_snd = self.snd(x)
         diff_max = [np.max(np.abs(y_fst - y_snd))
                     for y_fst, y_snd in zip(out_fst, out_snd)]
         self.max = np.concatenate([self.max, [diff_max]], axis=0)
@@ -226,8 +231,8 @@ def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
 
     # Compare intermediate results
     print('Comparing intermediate results...')
-    fst_interm = IntermRecord(fst_wl, fst_pat)
-    snd_interm = IntermRecord(snd_wl, snd_pat)
-    cmp = IntermCmp(fst_interm, snd_interm)
+    fst_rcd = BreakpointRecord(fst_wl, fst_pat)
+    snd_rcd = BreakpointRecord(snd_wl, snd_pat)
+    cmp = RecordCompare(fst_rcd, snd_rcd)
     cmp.test(data_gen, cmp_ratio)
     cmp.report()

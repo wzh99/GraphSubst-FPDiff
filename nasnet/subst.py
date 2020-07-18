@@ -1,26 +1,22 @@
-from graph import GraphSubst
+from typing import List
+
 import numpy as np
-
 from tvm import relay
-import common
 
-pat_num_feat = 64
-pat_batch_shape = (common.batch_size, pat_num_feat) + common.image_size
-pat_kernel_size = (1, 1)
-pat_weight_shape = (pat_num_feat, pat_num_feat) + pat_kernel_size
+from graph import GraphSubst
 
 
 class ConvAddSubst(GraphSubst):
     def get_pattern(self) -> relay.Expr:
-        x1 = relay.var('x1', shape=pat_batch_shape)
-        w1 = relay.var('w1', shape=pat_weight_shape)
+        x1 = relay.var('x1')
+        w1 = relay.var('w1')
         x1 = relay.nn.conv2d(x1, w1)
-        b1 = relay.var('b1', shape=(pat_num_feat,))
+        b1 = relay.var('b1')
         x1 = relay.nn.bias_add(x1, b1)
-        x2 = relay.var('x2', shape=pat_batch_shape)
-        w2 = relay.var('w2', shape=pat_weight_shape)
+        x2 = relay.var('x2')
+        w2 = relay.var('w2')
         x2 = relay.nn.conv2d(x2, w2)
-        b2 = relay.var('b2', shape=(pat_num_feat,))
+        b2 = relay.var('b2')
         x2 = relay.nn.bias_add(x2, b2)
         x = relay.add(x1, x2)
         return x
@@ -53,17 +49,36 @@ class ConvAddSubst(GraphSubst):
         return x
 
 
+def _get_breakpoint_patterns() -> List[relay.Expr]:
+    norm_pat = relay.concatenate([
+        relay.var('b1'), relay.var('b2'), relay.var('b3'),
+        relay.var('b4'), relay.var('b5'), relay.var('b6')
+    ], 1)
+    red_pat = relay.concatenate([
+        relay.var('b1'), relay.var('b2'), relay.var('b3'), relay.var('b4')
+    ], 1)
+    return [norm_pat, red_pat]
+
+
 if __name__ == '__main__':
     from nasnet import get_model
     from resnet import ConvBnSubst
     from graph import SubstPass
-    from work import Workload
+    from work import Workload, BreakpointRecord, RecordCompare
     import data
 
     x_test, y_test = data.load_test('cifar10', channel_first=True)
     test_gen = data.TvmDataGen(x_test, y_test)
-    nasnet = get_model(load_weights=True)
+    nasnet = get_model(6, load_weights=True)
     wl_1 = Workload.from_keras(nasnet, dtype='float16')
     wl_2 = SubstPass(ConvBnSubst)(wl_1)
     wl_3 = SubstPass(ConvAddSubst)(wl_2)
-    print(np.max(np.abs(wl_3(test_gen[0][0]) - wl_1(test_gen[0][0]))))
+    wl_1.evaluate(test_gen)
+    wl_3.evaluate(test_gen)
+    # pat_list = _get_breakpoint_patterns()
+    # rcd_1 = BreakpointRecord(wl_1, pat_list)
+    # rcd_3 = BreakpointRecord(wl_3, pat_list)
+    # cmp = RecordCompare(rcd_1, rcd_3)
+    # cmp.test(test_gen, 0.05)
+    # cmp.report()
+    pass

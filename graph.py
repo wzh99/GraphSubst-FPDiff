@@ -154,6 +154,8 @@ def match_one(pat: relay.Expr, expr: relay.Expr) -> bool:
         return _match_call(pat, expr)
     elif isinstance(pat, relay.TupleGetItem):
         return _match_tuple_getitem(pat, expr)
+    elif isinstance(pat, relay.Tuple):
+        return _match_tuple(pat, expr)
     else:
         return False
 
