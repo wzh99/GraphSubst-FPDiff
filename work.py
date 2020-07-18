@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional, Union, List
+from typing import Dict, Optional, Union, List
 
 import numpy as np
 import tensorflow as tf
@@ -18,7 +18,6 @@ class Workload:
     parameters.
     """
     executor: Optional[graph_runtime.GraphModule]
-    func: Optional[Callable]
 
     def __init__(self, mod: ir.IRModule,
                  params: Dict[str, Union[runtime.NDArray, np.ndarray]],
@@ -35,11 +34,11 @@ class Workload:
             Data type of network function and parameters.
         """
         self.mod = AlterDType(dtype)(mod)
+        self.mod = relay.transform.InferType()(self.mod)
         self.params = dict([(key, self._cvt_param(val, dtype))
                             for key, val in params.items()])
         self.dtype = dtype
         self.executor = None
-        self.func = None
 
     @staticmethod
     def _cvt_param(x: Union[runtime.NDArray, np.ndarray], dtype: str) -> np.ndarray:

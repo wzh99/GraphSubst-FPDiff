@@ -208,4 +208,4 @@ if __name__ == '__main__':
     from work import Workload
     nasnet = get_model(1)
     nasnet.summary()
-    print(Workload.from_keras(nasnet).mod)
+    print(Workload.from_keras(nasnet))

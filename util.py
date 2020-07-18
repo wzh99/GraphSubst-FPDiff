@@ -6,6 +6,7 @@ class AlterDType:
     """
     Alter data type involved in an expression..
     """
+
     def __init__(self, tgt_ty: str):
         self.var_mut = _VarDTypeMutator(tgt_ty)
 
@@ -37,3 +38,18 @@ class _TensorDTypeMutator(relay.TypeMutator):
 
     def visit_tensor_type(self, tt: relay.TensorType):
         return relay.TensorType(tt.concrete_shape, dtype=self.tgt_ty)
+
+
+def infer_type(expr: relay.Expr) -> relay.TensorType:
+    """
+    Check type of arbitrary expression,
+    :param expr: relay.Expr
+        The expression whose type will be checked.
+    :return: relay.Type
+        Type of the expression.
+    """
+    mod = ir.IRModule(functions={
+        'main': relay.Function(relay.analysis.free_vars(expr), expr)
+    })
+    ty = relay.transform.InferType()(mod)['main'].checked_type.ret_type
+    return ty
