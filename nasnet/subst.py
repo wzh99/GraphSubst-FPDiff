@@ -95,7 +95,7 @@ def _get_breakpoint_patterns() -> List[dfp.DFPattern]:
 if __name__ == '__main__':
     from nasnet import get_model
     from resnet import ConvBnSubst
-    from graph import SubstPass
+    import graph
     import work
     import data
 
@@ -103,11 +103,12 @@ if __name__ == '__main__':
     test_gen = data.TvmDataGen(x_test, y_test)
     nasnet = get_model(6, load_weights=True)
     wl_1 = work.Workload.from_keras(nasnet, dtype='float16')
-    wl_2 = SubstPass(ConvBnSubst)(wl_1)
-    wl_3 = SubstPass(ConvAddSubst)(wl_2)
-    wl_4 = SubstPass(AvgAddSubst)(wl_3)
-    wl_4.evaluate(test_gen)
+    wl_2 = graph.SubstPass(ConvBnSubst)(wl_1)
+    wl_3 = graph.SubstPass(ConvAddSubst)(wl_2)
+    wl_4 = graph.SubstPass(AvgAddSubst)(wl_3)
+    graph.visualize(wl_4, name='nasnet_opt', path='logs')
     # wl_1.evaluate(test_gen)
+    # wl_4.evaluate(test_gen)
     # pat_list = _get_breakpoint_patterns()
     # rcd_1 = work.BreakpointRecord(wl_1, pat_list)
     # rcd_4 = work.BreakpointRecord(wl_4, pat_list)

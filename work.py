@@ -22,7 +22,7 @@ class Workload:
 
     def __init__(self, mod: ir.IRModule,
                  params: Dict[str, Union[runtime.NDArray, np.ndarray]],
-                 dtype: str = common.dtype):
+                 dtype: str = common.dtype, name: str = ''):
         """
         Constructor.
         :param mod: ir.IRModule
@@ -39,6 +39,7 @@ class Workload:
         self.params = dict([(key, self._cvt_param(val, dtype))
                             for key, val in params.items()])
         self.dtype = dtype
+        self.name = name
         self.executor = None
 
     @staticmethod
@@ -50,7 +51,7 @@ class Workload:
         return x
 
     @staticmethod
-    def from_keras(model: keras.Model, dtype: str = 'float32'):
+    def from_keras(model: keras.Model, dtype: str = common.dtype):
         """
         Build workload from a Keras model.
         :param model: keras.Model
@@ -63,7 +64,7 @@ class Workload:
         mod, params = relay.frontend.from_keras(
             model, shape={'input_1': common.batch_shape_nchw}
         )
-        return Workload(mod, params, dtype=dtype)
+        return Workload(mod, params, dtype=dtype, name=model.name)
 
     def build(self):
         with transform.PassContext(opt_level=0,
@@ -76,7 +77,7 @@ class Workload:
         self.executor.set_input(**params)
 
     def as_type(self, dtype: str):
-        return Workload(self.mod, self.params, dtype=dtype)
+        return Workload(self.mod, self.params, dtype=dtype, name=self.name)
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
         if self.executor is None:

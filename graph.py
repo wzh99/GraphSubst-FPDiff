@@ -1,7 +1,8 @@
 import copy
-from typing import Dict, Type, List
+from typing import Dict, Type, Optional
 
 import numpy as np
+from graphviz import Digraph
 from tvm import relay, ir, transform
 from tvm.relay import dataflow_pattern as dfp
 
@@ -76,7 +77,8 @@ class SubstPass:
         for key, val in subst.params.items():
             if param_names.__contains__(key):
                 used_params[key] = val
-        return Workload(new_mod, used_params, dtype=workload.dtype)
+        return Workload(new_mod, used_params, dtype=workload.dtype,
+                        name=workload.name)
 
 
 @relay.transform.function_pass(opt_level=0)
@@ -130,64 +132,56 @@ class _SubstMutator(relay.ExprMutator):
                               ret_type=fn.ret_type)
 
 
-def match_any(pat_list: List[relay.Expr], expr: relay.Expr) -> bool:
-    for pat in pat_list:
-        if match_one(pat, expr):
-            return True
-    return False
+def visualize(wl: Workload, name: Optional[str] = None, path: str = ''):
+    if name is None:
+        name = wl.name
+    graph = Digraph(name=name)
+    _GraphVizVisitor(graph).visit_function(wl.mod['main'])
+    graph.view(directory=path)
 
 
-# noinspection PyTypeChecker
-def match_one(pat: relay.Expr, expr: relay.Expr) -> bool:
-    """
-    Match an expression with a pattern.
-    A expression matches another iff. they are of the same type and their
-    subexpressions match pairwise. A variable in the pattern matches any
-    expression.
-    :param pat: relay.Expr
-        Expression pattern for matching
-    :param expr: relay.Expr
-        Candidate expression to be matched
-    :return: bool
-        Whether `expr` matches `pattern`
-    """
-    # Check whether node type matches
-    if isinstance(pat, relay.Var):
-        return True  # a variable matches any expression
-    if pat.__class__ != expr.__class__:
-        return False
+class _GraphVizVisitor(relay.ExprVisitor):
+    def __init__(self, graph: Digraph):
+        super().__init__()
+        self.graph = graph
+        self.node_id: Dict[relay.Expr, str] = {}
+        self.counter = 0
 
-    # Check according to different node type
-    if isinstance(pat, relay.Call):
-        return _match_call(pat, expr)
-    elif isinstance(pat, relay.TupleGetItem):
-        return _match_tuple_getitem(pat, expr)
-    elif isinstance(pat, relay.Tuple):
-        return _match_tuple(pat, expr)
-    else:
-        return False
+    def visit(self, expr):
+        if self.node_id.__contains__(expr):
+            return
+        super().visit(expr)
 
+    def visit_var(self, var: relay.Var):
+        expr_id = self._register_node(var)
+        self.graph.node(expr_id, label=var.name_hint)
 
-def _match_call(pat: relay.Call, expr: relay.Call) -> bool:
-    # Match operator
-    if pat.op.name != expr.op.name:
-        return False
+    def visit_constant(self, const: relay.Constant):
+        expr_id = self._register_node(const)
+        self.graph.node(expr_id, label='const')
 
-    # Match arguments
-    return all([match_one(pat_arg, expr_arg)
-                for pat_arg, expr_arg in zip(pat.args, expr.args)])
+    def visit_call(self, call: relay.Call):
+        expr_id = self._register_node(call)
+        self.graph.node(expr_id, label=call.op.name)
+        for arg in call.args:
+            self.visit(arg)
+            self.graph.edge(self.node_id[arg], expr_id)
 
+    def visit_tuple(self, tup: relay.Tuple):
+        expr_id = self._register_node(tup)
+        self.graph.node(expr_id, label='(,)')
+        for field in tup.fields:
+            self.visit(field)
+            self.graph.edge(self.node_id[field], expr_id)
 
-def _match_tuple_getitem(pat: relay.TupleGetItem, expr: relay.TupleGetItem) -> bool:
-    return pat.index == expr.index and \
-           match_one(pat.tuple_value, expr.tuple_value)
+    def visit_tuple_getitem(self, getitem: relay.TupleGetItem):
+        expr_id = self._register_node(getitem)
+        self.graph.node(expr_id, label='.%d' % getitem.index)
+        self.visit(getitem.tuple_value)
+        self.graph.edge(self.node_id[getitem.tuple_value], expr_id)
 
-
-def _match_tuple(pat: relay.Tuple, expr: relay.Tuple) -> bool:
-    # Match field numbers
-    if len(pat.fields) != len(expr.fields):
-        return False
-
-    # Match fields pairwise
-    return all([match_one(pat_field, expr_field)
-                for pat_field, expr_field in zip(pat.fields, expr.fields)])
+    def _register_node(self, expr: relay.Expr) -> str:
+        cur_id = str(self.counter)
+        self.node_id[expr] = cur_id
+        self.counter += 1
+        return cur_id

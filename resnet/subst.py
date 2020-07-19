@@ -70,7 +70,7 @@ def _get_breakpoint_patterns() -> List[dfp.DFPattern]:
 
 if __name__ == '__main__':
     import work
-    from graph import SubstPass
+    import graph
     from resnet import get_model
     import data
 
@@ -78,8 +78,9 @@ if __name__ == '__main__':
     x_test, y_test = data.load_test('cifar10', channel_first=True)
     test_gen = data.TvmDataGen(x_test, y_test)
     wl = work.Workload.from_keras(resnet, dtype='float16')
-    subst_wl = SubstPass(ConvBnSubst)(wl)
+    subst_wl = graph.SubstPass(ConvBnSubst)(wl)
+    graph.visualize(subst_wl, 'logs')
     # wl = wl.as_type(common.dtype)
     # subst_wl = subst_wl.as_type(common.dtype)
-    pat_list = _get_breakpoint_patterns()
-    work.compare_two_workloads(wl, subst_wl, pat_list, pat_list, test_gen, 0.1)
+    # pat_list = _get_breakpoint_patterns()
+    # work.compare_two_workloads(wl, subst_wl, pat_list, pat_list, test_gen, 0.1)
