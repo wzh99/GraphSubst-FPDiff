@@ -3,20 +3,21 @@ from typing import Dict, Type, List
 
 import numpy as np
 from tvm import relay, ir, transform
+from tvm.relay import dataflow_pattern as dfp
 
 from work import Workload
 
 
-class GraphSubst:
+class GraphSubst(dfp.DFPatternCallback):
+    pattern: dfp.DFPattern
+
     def __init__(self, params: Dict[str, np.ndarray]):
+        super(GraphSubst, self).__init__()
         self.params = params
         self.next_idx = 1
 
-    def get_pattern(self) -> relay.Expr:
-        """
-        Get the expression pattern for subgraph matching.
-        :return: relay.Expr
-        """
+    def callback(self, pre: relay.Expr, post: relay.Expr, node_map: ir.Map) \
+            -> relay.Expr:
         pass
 
     def __call__(self, expr: relay.Expr) -> relay.Expr:
@@ -28,7 +29,8 @@ class GraphSubst:
             a subgraph that matches the pattern
         :return: relay.Expr
         """
-        pass
+        new_expr = self.rewrite(expr)
+        return new_expr
 
     def add_var_with_param(self, param: np.ndarray) -> relay.Var:
         var = relay.var(self.next_param_name(), shape=param.shape,
@@ -93,13 +95,34 @@ class _SubstMutator(relay.ExprMutator):
     def __init__(self, subst: GraphSubst):
         super(_SubstMutator, self).__init__()
         self.subst = subst
-        self.pattern = subst.get_pattern()
+        self.replaced: Dict[relay.Expr, relay.Expr] = {}
 
     def visit(self, expr: relay.Expr) -> relay.Expr:
         new_expr = super(_SubstMutator, self).visit(expr)
-        if not match_one(self.pattern, new_expr):
+        if not self.subst.pattern.match(new_expr):
             return new_expr
-        return self.subst(new_expr)
+        new_expr = self.subst(new_expr)
+        self.replaced[expr] = new_expr
+        return new_expr
+
+    def visit_call(self, call: relay.Call) -> relay.Call:
+        new_args = [self._try_find(arg) for arg in call.args]
+        return relay.Call(call.op, new_args, attrs=call.attrs)
+
+    def visit_tuple(self, tup: relay.Tuple) -> relay.Tuple:
+        new_fields = [self._try_find(field) for field in tup.fields]
+        return relay.Tuple(new_fields)
+
+    def visit_tuple_getitem(self, getitem: relay.TupleGetItem) \
+            -> relay.TupleGetItem:
+        new_value = self._try_find(getitem.tuple_value)
+        return relay.TupleGetItem(new_value, getitem.index)
+
+    def _try_find(self, expr: relay.Expr) -> relay.Expr:
+        if self.replaced.__contains__(expr):
+            return self.replaced[expr]
+        else:
+            return self.visit(expr)
 
     def visit_function(self, fn: relay.Function) -> relay.Function:
         new_body = self.visit(fn.body)

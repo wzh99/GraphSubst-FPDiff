@@ -6,6 +6,7 @@ from tensorflow import keras
 from tqdm import trange
 from tvm import relay, ir, runtime, transform
 from tvm.contrib import graph_runtime
+from tvm.relay import dataflow_pattern as dfp
 
 import common
 import data
@@ -106,7 +107,7 @@ class BreakpointRecord:
     Record intermediate results of a workload
     """
 
-    def __init__(self, workload: Workload, pat_list: List[relay.Expr]):
+    def __init__(self, workload: Workload, pat_list: List[dfp.DFPattern]):
         """
         Constructor.
         :param workload: Workload
@@ -135,15 +136,14 @@ class BreakpointRecord:
 
 
 class _BreakpointVisitor(relay.ExprVisitor):
-    def __init__(self, pat_list: List[relay.Expr]):
+    def __init__(self, pat_list: List[dfp.DFPattern]):
         super().__init__()
         self.matched: List[relay.Expr] = []
         self.pat_list = pat_list
 
     def visit(self, expr: relay.Expr):
         super(_BreakpointVisitor, self).visit(expr)
-        from graph import match_any
-        if match_any(self.pat_list, expr) and \
+        if any([pat.match(expr) for pat in self.pat_list]) and \
                 not any([expr.same_as(prev) for prev in self.matched]):
             self.matched.append(expr)
 
@@ -195,7 +195,7 @@ class RecordCompare:
 
 
 def compare_two_workloads(fst_wl: Workload, snd_wl: Workload,
-                          fst_pat: List[relay.Expr], snd_pat: List[relay.Expr],
+                          fst_pat: List[dfp.DFPattern], snd_pat: List[dfp.DFPattern],
                           data_gen: data.TvmDataGen, cmp_ratio: float = 1):
     """
     Compare evaluation and intermediate results of two workloads

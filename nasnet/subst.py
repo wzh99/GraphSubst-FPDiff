@@ -1,34 +1,39 @@
-from typing import List
+from typing import List, Dict
 
 import numpy as np
-from tvm import relay
+from tvm import relay, ir
+from tvm.relay import dataflow_pattern as dfp
 
 import util
 from graph import GraphSubst
 
 
 class ConvAddSubst(GraphSubst):
-    def get_pattern(self) -> relay.Expr:
-        x1 = relay.var('x1')
-        w1 = relay.var('w1')
-        x1 = relay.nn.conv2d(x1, w1)
-        b1 = relay.var('b1')
-        x1 = relay.nn.bias_add(x1, b1)
-        x2 = relay.var('x2')
-        w2 = relay.var('w2')
-        x2 = relay.nn.conv2d(x2, w2)
-        b2 = relay.var('b2')
-        x2 = relay.nn.bias_add(x2, b2)
-        x = relay.add(x1, x2)
-        return x
+    def __init__(self, params: Dict[str, np.ndarray]):
+        super(ConvAddSubst, self).__init__(params)
 
-    def __call__(self, expr: relay.Expr) -> relay.Expr:
-        # Extract related expressions
-        bias_add_1, bias_add_2 = expr.args
-        conv_1, b1_var = bias_add_1.args
-        conv_2, b2_var = bias_add_2.args
-        x1_var, w1_var = conv_1.args
-        x2_var, w2_var = conv_2.args
+        self.x1 = dfp.wildcard()
+        self.w1 = dfp.is_var()
+        x1 = dfp.is_op('nn.conv2d')(self.x1, self.w1)
+        self.b1 = dfp.is_var()
+        x1 = dfp.is_op('nn.bias_add')(x1, self.b1)
+        self.x2 = dfp.wildcard()
+        self.w2 = dfp.is_var()
+        x2 = dfp.is_op('nn.conv2d')(self.x2, self.w2)
+        self.b2 = dfp.is_var()
+        x2 = dfp.is_op('nn.bias_add')(x2, self.b2)
+        x = x1 + x2
+        self.pattern = x
+
+    def callback(self, pre: relay.Expr, post: relay.Expr, node_map: ir.Map) \
+            -> relay.Expr:
+        # Extract variables
+        x1 = node_map[self.x1][0]
+        x2 = node_map[self.x2][0]
+        b1_var = node_map[self.b1][0]
+        b2_var = node_map[self.b2][0]
+        w1_var = node_map[self.w1][0]
+        w2_var = node_map[self.w2][0]
 
         # Look up parameters
         b1_param = self[b1_var]
@@ -43,7 +48,7 @@ class ConvAddSubst(GraphSubst):
         fused_b_var = self.add_var_with_param(fused_b_param)
 
         # Rebuild subgraph
-        x = relay.concatenate([x1_var, x2_var], 1)
+        x = relay.concatenate([x1, x2], 1)
         x = relay.nn.conv2d(x, fused_w_var)
         x = relay.nn.bias_add(x, fused_b_var)
 
@@ -51,16 +56,18 @@ class ConvAddSubst(GraphSubst):
 
 
 class AvgAddSubst(GraphSubst):
-    def get_pattern(self) -> relay.Expr:
-        x = relay.var('x')
-        avg1 = relay.nn.avg_pool2d(x, pool_size=(3, 3), padding=(1, 1))
-        avg2 = relay.nn.avg_pool2d(x, pool_size=(3, 3), padding=(1, 1))
-        x = relay.add(avg1, avg2)
-        return x
+    def __init__(self, params: Dict[str, np.ndarray]):
+        super(AvgAddSubst, self).__init__(params)
 
-    def __call__(self, add: relay.Expr) -> relay.Expr:
-        avg1, avg2 = add.args
-        x = avg1.args[0]
+        self.x = dfp.wildcard()
+        avg1 = dfp.is_op('nn.avg_pool2d')(self.x)
+        avg2 = dfp.is_op('nn.avg_pool2d')(self.x)
+        x = avg1 + avg2
+        self.pattern = x
+
+    def callback(self, pre: relay.Expr, post: relay.Expr, node_map: ir.Map) \
+            -> relay.Expr:
+        x = node_map[self.x][0]
         x_type = util.infer_type(x)
         num_feat = int(x_type.shape[1])
         weight = (2. / 9) * np.ones((num_feat, 1, 3, 3), dtype=x_type.dtype)
@@ -69,15 +76,20 @@ class AvgAddSubst(GraphSubst):
         return x
 
 
-def _get_breakpoint_patterns() -> List[relay.Expr]:
-    norm_pat = relay.concatenate([
-        relay.var('b1'), relay.var('b2'), relay.var('b3'),
-        relay.var('b4'), relay.var('b5'), relay.var('b6')
-    ], 1)
-    red_pat = relay.concatenate([
-        relay.var('b1'), relay.var('b2'), relay.var('b3'), relay.var('b4')
-    ], 1)
-    return [norm_pat, red_pat]
+# noinspection PyTypeChecker
+def _get_breakpoint_patterns() -> List[dfp.DFPattern]:
+    norm = dfp.is_op('concatenate')(
+        dfp.is_tuple((
+            dfp.wildcard(), dfp.wildcard(), dfp.wildcard(),
+            dfp.wildcard(), dfp.wildcard(), dfp.wildcard()
+        ))
+    )
+    red = dfp.is_op('concatenate')(
+        dfp.is_tuple((
+            dfp.wildcard(), dfp.wildcard(), dfp.wildcard(), dfp.wildcard()
+        ))
+    )
+    return [norm, red]
 
 
 if __name__ == '__main__':
@@ -94,11 +106,11 @@ if __name__ == '__main__':
     wl_2 = SubstPass(ConvBnSubst)(wl_1)
     wl_3 = SubstPass(ConvAddSubst)(wl_2)
     wl_4 = SubstPass(AvgAddSubst)(wl_3)
-    # wl_4.evaluate(test_gen)
+    wl_4.evaluate(test_gen)
     # wl_1.evaluate(test_gen)
-    pat_list = _get_breakpoint_patterns()
-    rcd_1 = work.BreakpointRecord(wl_1, pat_list)
-    rcd_4 = work.BreakpointRecord(wl_4, pat_list)
+    # pat_list = _get_breakpoint_patterns()
+    # rcd_1 = work.BreakpointRecord(wl_1, pat_list)
+    # rcd_4 = work.BreakpointRecord(wl_4, pat_list)
     # cmp = work.RecordCompare(rcd_1, rcd_4)
     # cmp.test(test_gen, 0.05)
     # cmp.report()

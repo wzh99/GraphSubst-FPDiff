@@ -1,27 +1,40 @@
+from typing import List, Dict
+
 import numpy as np
-from tvm import relay
+from tvm import relay, ir
+from tvm.relay import dataflow_pattern as dfp
 
 from common import bn_eps
 from graph import GraphSubst
 
 
 class ConvBnSubst(GraphSubst):
-    def get_pattern(self) -> relay.Expr:
-        x = relay.var('x')
-        weight = relay.var('conv_weight')
-        gamma = relay.var('bn_gamma')
-        beta = relay.var('bn_beta')
-        moving_mean = relay.var('bn_moving_mean')
-        moving_var = relay.var('bn_moving_var')
-        x = relay.nn.conv2d(x, weight)
-        x, _, _ = relay.nn.batch_norm(x, gamma, beta, moving_mean, moving_var)
-        return x
+    def __init__(self, params: Dict[str, np.ndarray]):
+        super(ConvBnSubst, self).__init__(params)
 
-    def __call__(self, expr: relay.TupleGetItem) -> relay.Expr:
-        # Extract related expressions and variables
-        bn_call = expr.tuple_value
-        conv_call, gamma_var, beta_var, moving_mean_var, moving_var_var = bn_call.args
-        x, weight_var = conv_call.args
+        # Setup pattern
+        self.x = dfp.wildcard()
+        self.weight = dfp.is_var()
+        self.conv = dfp.is_op('nn.conv2d')(self.x, self.weight)
+        self.gamma = dfp.is_var()
+        self.beta = dfp.is_var()
+        self.moving_mean = dfp.is_var()
+        self.moving_var = dfp.is_var()
+        x = dfp.is_op('nn.batch_norm')(self.conv, self.gamma, self.beta,
+                                       self.moving_mean, self.moving_var)
+        x = dfp.is_tuple_get_item(x, 0)
+        self.pattern = x
+
+    def callback(self, pre: relay.Expr, post: relay.Expr, node_map: ir.Map) \
+            -> relay.Expr:
+        # Extract variables from node map
+        x = node_map[self.x][0]
+        weight_var = node_map[self.weight][0]
+        gamma_var = node_map[self.gamma][0]
+        beta_var = node_map[self.beta][0]
+        moving_mean_var = node_map[self.moving_mean][0]
+        moving_var_var = node_map[self.moving_var][0]
+        conv_call = node_map[self.conv][0]
 
         # Get parameters for variables involved
         weight_param = self[weight_var]
@@ -47,12 +60,12 @@ class ConvBnSubst(GraphSubst):
         return x
 
 
-def _get_breakpoint_pattern() -> relay.Expr:
-    s = relay.var('s')
-    x = relay.var('x')
-    x = relay.add(x, s)
-    x = relay.nn.relu(x)
-    return x
+def _get_breakpoint_patterns() -> List[dfp.DFPattern]:
+    x = dfp.wildcard()
+    shortcut = dfp.wildcard()
+    x = dfp.is_op('add')(x, shortcut)
+    x = dfp.is_op('nn.relu')(x)
+    return [x]
 
 
 if __name__ == '__main__':
@@ -68,5 +81,5 @@ if __name__ == '__main__':
     subst_wl = SubstPass(ConvBnSubst)(wl)
     # wl = wl.as_type(common.dtype)
     # subst_wl = subst_wl.as_type(common.dtype)
-    pat = _get_breakpoint_pattern()
-    work.compare_two_workloads(wl, subst_wl, [pat], [pat], test_gen, 0.1)
+    pat_list = _get_breakpoint_patterns()
+    work.compare_two_workloads(wl, subst_wl, pat_list, pat_list, test_gen, 0.1)
