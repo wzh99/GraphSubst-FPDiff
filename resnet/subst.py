@@ -12,7 +12,6 @@ class ConvBnSubst(GraphSubst):
     def __init__(self, params: Dict[str, np.ndarray]):
         super(ConvBnSubst, self).__init__(params)
 
-        # Setup pattern
         self.x = dfp.wildcard()
         self.weight = dfp.is_var()
         self.conv = dfp.is_op('nn.conv2d')(self.x, self.weight)

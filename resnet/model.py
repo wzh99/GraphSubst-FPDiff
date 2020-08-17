@@ -57,6 +57,6 @@ if __name__ == '__main__':
 
     resnet = get_model(3)
     resnet.summary()
-    keras.utils.plot_model(resnet, to_file='resnet.png')
+    keras.utils.plot_model(resnet, to_file='logs/resnet-20.png')
     workload = Workload.from_keras(resnet)
     print(workload.mod.astext())
